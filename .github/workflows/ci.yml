@@ -1,1 +1,266 @@
+name: SWARM Unified CI
 
+on:
+
+  push:
+    branches:
+      - "**"
+
+  pull_request:
+    branches:
+      - "**"
+
+  schedule:
+    - cron: "0 * * * *"
+
+  workflow_dispatch:
+
+env:
+
+  NODE_VERSION: 20
+
+  PROTECTED_PATHS: |
+    architecture.md
+    specs/
+    docs/
+    prompts/
+    governance/
+
+jobs:
+
+##########################################################
+# 1 — PREPARE ENVIRONMENT
+##########################################################
+
+  setup:
+
+    runs-on: ubuntu-latest
+
+    outputs:
+      node-cache: ${{ steps.cache.outputs.cache-hit }}
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Cache dependencies
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+
+      - name: Install dependencies
+        run: |
+          npm install || true
+
+##########################################################
+# 2 — ARTIFACT INTEGRITY CHECK
+##########################################################
+
+  governance-check:
+
+    runs-on: ubuntu-latest
+    needs: setup
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - name: Verify protected artifacts unchanged
+        run: |
+
+          echo "Checking protected artifacts..."
+
+          git diff --name-only origin/main | while read file
+          do
+
+            if echo "$PROTECTED_PATHS" | grep -q "$file"; then
+              echo "Protected artifact modified: $file"
+              exit 1
+            fi
+
+          done
+
+##########################################################
+# 3 — REPO BRAIN ANALYSIS
+##########################################################
+
+  repo-brain:
+
+    runs-on: ubuntu-latest
+    needs: governance-check
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - name: Run Repo Brain
+        run: |
+
+          if [ -f brain/repo_brain.js ]; then
+            node brain/repo_brain.js
+          else
+            echo "Repo Brain not present"
+          fi
+
+##########################################################
+# 4 — SWARM AUDIT
+##########################################################
+
+  swarm-audit:
+
+    runs-on: ubuntu-latest
+    needs: repo-brain
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - name: Run SWARM scan
+        run: |
+
+          if [ -f swarm/repo_scan.js ]; then
+            node swarm/repo_scan.js
+          else
+            echo "No scan script"
+          fi
+
+##########################################################
+# 5 — REPAIR ENGINE
+##########################################################
+
+  repair:
+
+    runs-on: ubuntu-latest
+    needs: swarm-audit
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - name: Run repair engine
+        run: |
+
+          if [ -f repair/repair_engine.js ]; then
+            node repair/repair_engine.js
+          else
+            echo "Repair engine not found"
+          fi
+
+##########################################################
+# 6 — BUILD PROJECT
+##########################################################
+
+  build:
+
+    runs-on: ubuntu-latest
+    needs: repair
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - name: Build project
+        run: |
+
+          if npm run | grep build; then
+            npm run build
+          else
+            echo "No build script defined"
+          fi
+
+##########################################################
+# 7 — RUN TESTS
+##########################################################
+
+  tests:
+
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - name: Run tests
+        run: |
+
+          if npm run | grep test; then
+            npm test
+          else
+            echo "No tests configured"
+          fi
+
+##########################################################
+# 8 — SECURITY SCAN
+##########################################################
+
+  security:
+
+    runs-on: ubuntu-latest
+    needs: tests
+
+    permissions:
+      security-events: write
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+
+##########################################################
+# 9 — META-BRAIN GOVERNANCE REPORT
+##########################################################
+
+  meta-brain:
+
+    runs-on: ubuntu-latest
+    needs: security
+
+    steps:
+
+      - uses: actions/checkout@v4
+
+      - name: Generate governance report
+        run: |
+
+          if [ -f meta/meta_brain.js ]; then
+            node meta/meta_brain.js
+          else
+            echo "Meta-brain not present"
+          fi
+
+##########################################################
+# 10 — SUCCESS TERMINATION
+##########################################################
+
+  success:
+
+    runs-on: ubuntu-latest
+    needs: meta-brain
+
+    steps:
+
+      - name: Final status
+        run: |
+          echo "SWARM governance cycle complete"
+          echo "Mode complete. Awaiting operator approval."
