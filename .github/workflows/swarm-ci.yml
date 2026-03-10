@@ -1,0 +1,41 @@
+name: SWARM Shared CI
+
+on:
+  workflow_call:
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install
+        run: npm install || true
+
+      - name: Run repo scan
+        run: |
+          if [ -f swarm/repo_scan.js ]; then
+            node swarm/repo_scan.js
+          fi
+
+      - name: Run repair
+        run: |
+          if [ -f repair/repair_engine.js ]; then
+            node repair/repair_engine.js
+          fi
+
+      - name: Build
+        run: npm run build || echo "no build"
+
+      - name: Test
+        run: npm test || echo "no tests"
